@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0b0f">
+<title>双机位 Dual Cam</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+:root{--bg:#0b0b0f;--panel:#16161d;--line:#2a2a35;--txt:#f2f2f5;--mut:#9a9aa8;--c1:#4f8cff;--c2:#ff9f43;--rec:#ff3b4a;--ok:#2ecc71}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC",system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+.hidden{display:none!important}
+
+/* ---------- Lobby ---------- */
+.screen{height:100dvh;display:flex;flex-direction:column;justify-content:center;padding:28px;padding-top:max(28px,env(safe-area-inset-top));max-width:460px;margin:0 auto;gap:20px}
+.screen h1{font-size:34px;margin:0;letter-spacing:-.5px}
+.screen h1 span{background:linear-gradient(90deg,var(--c1),var(--c2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.screen p{margin:0;color:var(--mut);line-height:1.6;font-size:15px}
+.big{display:flex;align-items:center;gap:16px;width:100%;padding:22px 20px;border-radius:20px;text-align:left;transition:transform .1s}
+.big:active{transform:scale(.98)}
+.big .em{font-size:34px}
+.big b{display:block;font-size:20px}
+.big small{display:block;font-size:13px;opacity:.75;margin-top:3px}
+.big.host{background:rgba(79,140,255,.15);color:var(--c1)}
+.big.guest{background:rgba(255,159,67,.15);color:var(--c2)}
+.back{align-self:flex-start;color:var(--mut);font-size:15px;padding:6px 0}
+.codeIn{display:flex;gap:10px;justify-content:center}
+.codeIn input{width:64px;height:78px;background:var(--panel);border:2px solid var(--line);border-radius:16px;color:var(--txt);font-size:36px;font-weight:800;text-align:center;outline:none;caret-color:var(--c2)}
+.codeIn input:focus{border-color:var(--c2)}
+.btn{display:block;width:100%;padding:16px;border-radius:16px;background:var(--txt);color:var(--bg);font-weight:800;font-size:16px;text-align:center;text-decoration:none}
+.btn:disabled{opacity:.35}
+.btn.ghost{background:var(--panel);color:var(--txt)}
+.err{color:var(--rec);font-size:14px;min-height:20px;text-align:center}
+
+/* ---------- App ---------- */
+#app{height:100dvh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));font-size:14px;flex:none}
+.pill{display:flex;align-items:center;gap:7px;background:var(--panel);padding:7px 12px;border-radius:99px;white-space:nowrap}
+.pill b{letter-spacing:3px;font-variant-numeric:tabular-nums}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+.dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.wait{background:#f1c40f;animation:blink 1s infinite}
+#status{color:var(--mut);font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbtn{background:var(--panel);padding:7px 12px;border-radius:99px;font-size:13px;white-space:nowrap}
+
+#stage{flex:1;display:flex;flex-direction:column;gap:3px;min-height:0;padding:0 6px}
+.pane{position:relative;flex:1;min-height:0;background:#000;border-radius:14px;overflow:hidden;transition:flex .25s}
+.pane video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+.pane video.mirror{transform:scaleX(-1)}
+#stage.focus1 #p2,#stage.focus2 #p1{flex:0;opacity:0;pointer-events:none}
+.label{position:absolute;left:10px;top:10px;font-size:13px;font-weight:700;padding:5px 10px;border-radius:99px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:3}
+#p1 .label{color:var(--c1)} #p2 .label{color:var(--c2)}
+#p1{box-shadow:inset 0 0 0 2px rgba(79,140,255,.35)} #p2{box-shadow:inset 0 0 0 2px rgba(255,159,67,.35)}
+.label em{font-style:normal;color:#fff;font-weight:500;opacity:.8}
+.recb{position:absolute;right:10px;top:10px;background:var(--rec);color:#fff;font-size:13px;font-weight:700;padding:5px 10px;border-radius:99px;display:flex;align-items:center;gap:6px;z-index:3;font-variant-numeric:tabular-nums}
+.recb::before{content:"";width:8px;height:8px;border-radius:50%;background:#fff;animation:blink 1s infinite}
+.pane.recording{box-shadow:inset 0 0 0 3px var(--rec)!important}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;z-index:4;pointer-events:none}
+.flash.go{animation:flash .35s ease-out}
+.ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--mut);font-size:14px;text-align:center;padding:20px;z-index:2;background:#07070a}
+.ph .spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--mut);border-radius:50%;animation:spin 1s linear infinite}
+.ph .code{font-size:52px;font-weight:800;letter-spacing:12px;color:var(--txt);font-variant-numeric:tabular-nums;margin-right:-12px}
+.grid{position:absolute;inset:0;pointer-events:none;z-index:1;display:none}
+body.showgrid .grid{display:block}
+.grid i{position:absolute;background:rgba(255,255,255,.35)}
+.grid i:nth-child(1){left:33.33%;top:0;bottom:0;width:1px}
+.grid i:nth-child(2){left:66.66%;top:0;bottom:0;width:1px}
+.grid i:nth-child(3){top:33.33%;left:0;right:0;height:1px}
+.grid i:nth-child(4){top:66.66%;left:0;right:0;height:1px}
+
+#controls{flex:none;padding:10px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+.seg{display:grid;grid-template-columns:1fr 1fr 1fr;background:var(--panel);border-radius:12px;padding:3px}
+.seg button{padding:9px 0;border-radius:10px;font-size:14px;font-weight:600;color:var(--mut)}
+.seg button:disabled{opacity:.4}
+.seg button.on[data-t="1"]{background:var(--c1);color:#fff}
+.seg button.on[data-t="2"]{background:var(--c2);color:#fff}
+.seg button.on[data-t="both"]{background:linear-gradient(90deg,var(--c1),var(--c2));color:#fff}
+.modes{display:flex;justify-content:center;gap:22px;font-size:14px;font-weight:700}
+.modes button{color:var(--mut);padding:2px 4px}
+.modes button.on{color:#ffd60a}
+.bar{display:flex;align-items:center;justify-content:space-around}
+.ic{width:52px;height:52px;border-radius:50%;background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:19px;position:relative}
+.ic small{font-size:10px;color:var(--mut);margin-top:1px}
+.ic.on{background:#2c2c3a;box-shadow:inset 0 0 0 1.5px var(--txt)}
+.ic .badge{position:absolute;top:-2px;right:-2px;background:var(--rec);color:#fff;font-size:11px;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+#shutter{width:76px;height:76px;border-radius:50%;border:4px solid #fff;display:flex;align-items:center;justify-content:center}
+#shutter i{width:58px;height:58px;border-radius:50%;background:var(--rec);transition:all .2s}
+#shutter.photo i{background:#fff}
+#shutter.photo:active i{transform:scale(.88)}
+#shutter.on i{width:28px;height:28px;border-radius:7px}
+
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.sheet .box{background:var(--panel);width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:20px;padding-bottom:max(20px,env(safe-area-inset-bottom));max-height:80dvh;overflow:auto}
+.sheet h3{margin:0 0 6px;font-size:18px}
+.sheet p{margin:0 0 14px;color:var(--mut);font-size:14px;line-height:1.5}
+.sheet .btn{margin-top:10px}
+.bigcode{font-size:64px;font-weight:800;letter-spacing:16px;text-align:center;padding:10px 0 4px;font-variant-numeric:tabular-nums;margin-right:-16px}
+.clip{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.clip video,.clip img{width:72px;height:96px;object-fit:cover;border-radius:8px;background:#000;flex:none}
+.clip .meta{flex:1;font-size:14px;word-break:break-all}
+.clip .meta small{display:block;color:var(--mut);margin-top:3px}
+.clip .acts{display:flex;flex-direction:column;gap:6px}
+.clip .acts a,.clip .acts button{background:var(--txt);color:var(--bg);font-size:13px;font-weight:700;padding:8px 12px;border-radius:10px;text-decoration:none;text-align:center}
+.empty{color:var(--mut);text-align:center;padding:24px 0;font-size:14px}
+
+#toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 52px));transform:translateX(-50%);background:rgba(30,30,40,.95);padding:10px 16px;border-radius:12px;font-size:14px;z-index:60;opacity:0;transition:opacity .25s;pointer-events:none;max-width:88vw;text-align:center}
+#toast.show{opacity:1}
+
+@keyframes blink{50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes flash{0%{opacity:.85}100%{opacity:0}}
+</style>
+</head>
+<body>
+
+<!-- ============ Home ============ -->
+<section class="screen" id="home">
+  <div>
+    <h1>双机位 <span>Dual Cam</span></h1>
+    <p>两台手机互看对方镜头的画面，调好角度，再选哪一台拍照或录影。</p>
+  </div>
+  <button class="big host" id="hostBtn"><span class="em">📷</span><span><b>开房间</b><small>这台当主机（机位 1），会给你一个房间码</small></span></button>
+  <button class="big guest" id="guestBtn"><span class="em">🎥</span><span><b>加入房间</b><small>输入主机上的房间码（机位 2）</small></span></button>
+  <div class="err" id="homeErr"></div>
+</section>
+
+<!-- ============ Join ============ -->
+<section class="screen hidden" id="joinScr">
+  <button class="back" id="backBtn">‹ 返回</button>
+  <div>
+    <h1>输入房间码</h1>
+    <p>主机屏幕上显示的 4 位数字</p>
+  </div>
+  <div class="codeIn" id="codeIn">
+    <input inputmode="numeric" maxlength="1" autocomplete="one-time-code">
+    <input inputmode="numeric" maxlength="1">
+    <input inputmode="numeric" maxlength="1">
+    <input inputmode="numeric" maxlength="1">
+  </div>
+  <button class="btn" id="joinGo" disabled>进入房间</button>
+  <div class="err" id="joinErr"></div>
+</section>
+
+<!-- ============ App ============ -->
+<section id="app" class="hidden">
+  <header>
+    <div class="pill" id="roomPill"><span class="dot wait" id="dot"></span>房间 <b id="roomLbl">----</b></div>
+    <div id="status">连接中…</div>
+    <button class="hbtn" id="leaveBtn">退出</button>
+  </header>
+
+  <div id="stage">
+    <div class="pane" id="p1">
+      <video playsinline autoplay muted></video>
+      <div class="grid"><i></i><i></i><i></i><i></i></div>
+      <div class="flash"></div>
+      <div class="label">机位 1 <em></em></div>
+      <div class="recb hidden">00:00</div>
+      <div class="ph"><div class="spin"></div><div class="phTxt"></div></div>
+    </div>
+    <div class="pane" id="p2">
+      <video playsinline autoplay muted></video>
+      <div class="grid"><i></i><i></i><i></i><i></i></div>
+      <div class="flash"></div>
+      <div class="label">机位 2 <em></em></div>
+      <div class="recb hidden">00:00</div>
+      <div class="ph"><div class="spin"></div><div class="phTxt"></div></div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="seg" id="seg">
+      <button data-t="1">用机位 1</button>
+      <button data-t="2">用机位 2</button>
+      <button data-t="both">两台同时</button>
+    </div>
+    <div class="modes" id="modes">
+      <button data-m="photo">拍照</button>
+      <button data-m="video" class="on">录影</button>
+    </div>
+    <div class="bar">
+      <button class="ic" id="flipBtn">🔄<small>翻转</small></button>
+      <button class="ic" id="gridBtn">#<small>网格</small></button>
+      <button id="shutter"><i></i></button>
+      <button class="ic" id="clipsBtn">🎞<small>本机</small><span class="badge hidden" id="clipCount">0</span></button>
+      <button class="ic" id="torchBtn">🔦<small>补光</small></button>
+    </div>
+  </div>
+</section>
+
+<!-- Room code sheet -->
+<div class="sheet hidden" id="codeSheet">
+  <div class="box">
+    <h3>房间码</h3>
+    <p>在另一台手机打开这个网站 →「加入房间」→ 输入：</p>
+    <div class="bigcode" id="bigCode">----</div>
+    <button class="btn ghost" data-close>好</button>
+  </div>
+</div>
+
+<!-- Clips sheet -->
+<div class="sheet hidden" id="clipsSheet">
+  <div class="box">
+    <h3>这台手机拍的</h3>
+    <p>照片和视频存在<b>拍摄的那台手机</b>上（原画质）。点「保存」存到相册 / 文件。</p>
+    <div id="clipList"></div>
+    <button class="btn ghost" data-close>关闭</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const PREFIX = 'jdualcam-v2-';
+
+let room, myCam, otherCam, peer, localStream;
+let call = null, conn = null, dialing = 0, everConnected = false, joinT0 = 0;
+let facing = 'environment', remoteFacing = 'environment';
+let recorder = null, chunks = [], localRec = false, remoteRec = false;
+let localT0 = 0, remoteT0 = 0, tick = null;
+let target = '1', mode = 'video', clips = [], torchOn = false;
+
+/* ---------- helpers ---------- */
+const newCode = () => String(Math.floor(1000 + Math.random()*9000));
+const pane = c => $('#p'+c);
+const vid = c => pane(c).querySelector('video');
+const idFor = c => PREFIX + room + '-' + c;
+const fmt = ms => { const s=Math.floor(ms/1000); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
+const stamp = () => { const d=new Date(); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(''); };
+let toastT; function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+function setStatus(txt, state){ $('#status').textContent=txt; $('#dot').className='dot '+(state||''); }
+function show(id){ ['home','joinScr','app'].forEach(x => $('#'+x).classList.toggle('hidden', x!==id)); }
+
+/* ---------- home / join ---------- */
+$('#hostBtn').onclick = () => enter('1', newCode());
+$('#guestBtn').onclick = () => { show('joinScr'); $('#joinErr').textContent=''; boxes[0].focus(); };
+$('#backBtn').onclick = () => show('home');
+
+const boxes = $$('#codeIn input');
+const codeVal = () => boxes.map(b=>b.value).join('');
+boxes.forEach((b,i) => {
+  b.addEventListener('input', () => {
+    const digits = b.value.replace(/\D/g,'');
+    if (digits.length > 1){ // pasted / autofill
+      digits.slice(0,4).split('').forEach((d,j)=>{ if(boxes[j]) boxes[j].value=d; });
+      boxes[Math.min(digits.length,4)-1].focus();
+    } else { b.value = digits; if (digits && boxes[i+1]) boxes[i+1].focus(); }
+    $('#joinGo').disabled = codeVal().length !== 4;
+    if (codeVal().length === 4) $('#joinGo').click();
+  });
+  b.addEventListener('keydown', e => { if (e.key==='Backspace' && !b.value && boxes[i-1]){ boxes[i-1].focus(); boxes[i-1].value=''; } });
+  b.addEventListener('focus', () => b.select());
+});
+$('#joinGo').onclick = () => { if (codeVal().length===4) enter('2', codeVal()); };
+
+async function getCam(){
+  return navigator.mediaDevices.getUserMedia({
+    video:{ facingMode:{ideal:facing}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30} },
+    audio:{ echoCancellation:true, noiseSuppression:true }
+  });
+}
+
+async function enter(cam, code){
+  const errEl = cam==='1' ? $('#homeErr') : $('#joinErr');
+  if (!navigator.mediaDevices?.getUserMedia){ errEl.textContent='这个浏览器不能用相机。请用 Safari / Chrome，并确认网址是 https://'; return; }
+  errEl.textContent = '正在打开相机…';
+  if (!localStream){
+    try { localStream = await getCam(); }
+    catch(e){ errEl.textContent = '打不开相机：' + (e.name==='NotAllowedError' ? '请允许相机和麦克风权限' : e.message); return; }
+  }
+  errEl.textContent = '';
+  room = code; myCam = cam; otherCam = cam==='1' ? '2' : '1';
+  target = myCam; everConnected = false; joinT0 = Date.now();
+
+  show('app');
+  $('#roomLbl').textContent = room; $('#bigCode').textContent = room;
+  pane(myCam).querySelector('em').textContent = '· 本机';
+  pane(otherCam).querySelector('em').textContent = '· 对方';
+  pane(myCam).querySelector('.ph').classList.add('hidden');
+  pane(otherCam).querySelector('.ph').classList.remove('hidden');
+  showLocal(); setWaitingText();
+  updateSeg(); updateMode();
+  startPeer(); keepAwake();
+}
+
+function setWaitingText(lost){
+  const t = pane(otherCam).querySelector('.phTxt');
+  if (myCam==='1'){
+    t.innerHTML = (lost ? '机位 2 断线了，等它重新进来…<br><br>' : '') +
+      `另一台手机点「加入房间」输入<div class="code">${room}</div>`;
+  } else {
+    t.innerHTML = lost ? '机位 1 断线了，重新连接中…' : `正在进入房间 ${room}…`;
+  }
+}
+
+function showLocal(){
+  const v = vid(myCam); v.srcObject = localStream; v.muted = true;
+  v.classList.toggle('mirror', facing==='user'); v.play().catch(()=>{});
+}
+
+/* ---------- peer / connection ---------- */
+function videoOnly(){ return new MediaStream(localStream.getVideoTracks()); }
+
+function startPeer(){
+  setStatus(myCam==='1' ? '开房间中…' : '连接中…','wait');
+  peer = new Peer(idFor(myCam), { debug:1, config:{ iceServers:[
+    {urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},{urls:'stun:stun.cloudflare.com:3478'}
+  ]}});
+  peer.on('open', () => {
+    if (myCam==='1'){ setStatus('等另一台加入','wait'); $('#codeSheet').classList.remove('hidden'); }
+    else { setStatus('寻找房间…','wait'); dial(); }
+  });
+  // 主机接受所有进来的连线（会取代旧的）；加入者负责拨号
+  peer.on('call', c => { if (call && call!==c) try{call.close();}catch{} c.answer(videoOnly()); attachCall(c); });
+  peer.on('connection', d => { if (conn && conn!==d) try{conn.close();}catch{} attachConn(d); });
+  peer.on('error', e => {
+    if (e.type==='unavailable-id'){
+      if (myCam==='1' && !everConnected){ // 房间码撞了，自动换一个
+        destroyPeer(); room = newCode(); $('#roomLbl').textContent=room; $('#bigCode').textContent=room; setWaitingText(); startPeer();
+      } else if (myCam==='2'){
+        destroyPeer(); show('joinScr'); $('#joinErr').textContent = '这个房间已经有另一台加入了';
+      }
+    } else if (e.type==='peer-unavailable'){
+      if (myCam==='2' && !everConnected && Date.now()-joinT0 > 7000){
+        destroyPeer(); show('joinScr'); $('#joinErr').textContent = `找不到房间 ${room}，请检查房间码，或确认主机还开着`;
+        boxes.forEach(b=>b.value=''); $('#joinGo').disabled=true; boxes[0].focus();
+      } else setStatus('寻找房间…','wait');
+    } else if (['network','server-error','socket-error','socket-closed','disconnected'].includes(e.type)){
+      setStatus('网络断开，重连中…','wait');
+    } else console.warn(e);
+  });
+  peer.on('disconnected', () => setTimeout(()=>{ if (peer && peer.disconnected && !peer.destroyed) peer.reconnect(); },1500));
+}
+setInterval(() => dial(), 3000);
+
+function destroyPeer(){ try{ peer && peer.destroy(); }catch{} peer=null; call=null; conn=null; dialing=0; }
+
+function dial(){
+  if (myCam!=='2' || !peer || !peer.open) return;
+  if (call && call.open) return;
+  if (dialing && Date.now()-dialing < 6000) return;
+  dialing = Date.now();
+  const c = peer.call(idFor(otherCam), videoOnly()); if (c) attachCall(c);
+  const d = peer.connect(idFor(otherCam), {reliable:true}); if (d) attachConn(d);
+}
+
+function attachCall(c){
+  call = c;
+  c.on('stream', s => {
+    if (call !== c) return;
+    const v = vid(otherCam); v.srcObject = s; v.play().catch(()=>{});
+    pane(otherCam).querySelector('.ph').classList.add('hidden');
+    $('#codeSheet').classList.add('hidden');
+    setStatus(`已连线 · 机位 ${otherCam}`,'ok'); dialing = 0;
+    if (!everConnected) toast(`机位 ${otherCam} 已连线 ✅`);
+    everConnected = true;
+  });
+  const lost = () => { if (call !== c) return; call = null; onLost(); };
+  c.on('close', lost); c.on('error', lost);
+  setTimeout(() => {
+    const pc = c.peerConnection; if (!pc) return;
+    pc.addEventListener('iceconnectionstatechange', () => {
+      if (['failed','closed'].includes(pc.iceConnectionState)){ try{c.close();}catch{} lost(); }
+    });
+  }, 0);
+}
+
+function attachConn(d){
+  conn = d;
+  d.on('open', () => send({type:'hello', facing, rec:localRec}));
+  d.on('data', onData);
+  d.on('close', () => { if (conn===d) conn = null; });
+}
+
+function onLost(){
+  pane(otherCam).querySelector('.ph').classList.remove('hidden');
+  setWaitingText(true);
+  setStatus(`等待机位 ${otherCam}…`,'wait');
+  remoteRec = false; updateUI(); dialing = 0;
+}
+
+function send(m){ if (conn && conn.open) try{ conn.send(m); }catch{} }
+
+function onData(m){
+  if (!m || !m.type) return;
+  switch(m.type){
+    case 'hello': remoteRec=!!m.rec; remoteFacing=m.facing; if(remoteRec) remoteT0=Date.now(); applyRemoteMirror(); updateUI(); break;
+    case 'facing': remoteFacing=m.facing; applyRemoteMirror(); break;
+    case 'rec': m.action==='start' ? startRec(true) : stopRec(true); break;
+    case 'shot': takePhoto(true); break;
+    case 'shotDone': flash(otherCam); toast(`机位 ${otherCam} 拍好了 📸（存在那台手机）`); break;
+    case 'recState': remoteRec=m.on; if(m.on) remoteT0=Date.now(); updateUI();
+      if(!m.on) toast(`机位 ${otherCam} 录好了（${m.dur}），存在那台手机`); break;
+  }
+}
+function applyRemoteMirror(){ vid(otherCam).classList.toggle('mirror', remoteFacing==='user'); }
+function flash(c){ const f=pane(c).querySelector('.flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+
+/* ---------- shutter ---------- */
+const targets = () => target==='both' ? ['1','2'] : [target];
+const recOf = c => c===myCam ? localRec : remoteRec;
+
+$('#shutter').onclick = () => {
+  const ts = targets();
+  if (mode==='photo'){
+    for (const t of ts){
+      if (t===myCam) takePhoto();
+      else if (conn && conn.open) send({type:'shot'});
+      else toast(`机位 ${t} 还没连线`);
+    }
+    return;
+  }
+  const action = ts.some(recOf) ? 'stop' : 'start';
+  for (const t of ts){
+    if (t===myCam) action==='start' ? startRec() : stopRec();
+    else if (conn && conn.open) send({type:'rec', action});
+    else toast(`机位 ${t} 还没连线`);
+  }
+};
+
+/* ---------- photo ---------- */
+async function takePhoto(fromRemote){
+  flash(myCam);
+  let blob = null;
+  const track = localStream.getVideoTracks()[0];
+  if (window.ImageCapture && !localRec){
+    try { blob = await new ImageCapture(track).takePhoto(); } catch{ blob = null; }
+  }
+  if (!blob){
+    const v = vid(myCam), cv = document.createElement('canvas');
+    cv.width = v.videoWidth; cv.height = v.videoHeight;
+    const ctx = cv.getContext('2d');
+    if (facing==='user'){ ctx.translate(cv.width,0); ctx.scale(-1,1); }
+    ctx.drawImage(v,0,0);
+    blob = await new Promise(r => cv.toBlob(r,'image/jpeg',0.95));
+  }
+  addClip(blob, 'image/jpeg', `机位${myCam}_${stamp()}.jpg`, '照片');
+  send({type:'shotDone'});
+  if (fromRemote) toast(`机位 ${otherCam} 叫这台拍了一张 📸`);
+}
+
+/* ---------- video ---------- */
+function pickMime(){
+  const list = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  return list.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+}
+function startRec(fromRemote){
+  if (localRec) return;
+  if (!window.MediaRecorder){ toast('这台手机的浏览器不支持录影'); return; }
+  const mime = pickMime(); chunks = [];
+  try { recorder = new MediaRecorder(localStream, mime ? {mimeType:mime, videoBitsPerSecond:8_000_000} : {videoBitsPerSecond:8_000_000}); }
+  catch { recorder = new MediaRecorder(localStream); }
+  const r = recorder;
+  r.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  r.onstop = () => {
+    const type = (r.mimeType || mime || 'video/webm').split(';')[0];
+    const dur = fmt(Date.now()-localT0);
+    addClip(new Blob(chunks,{type}), type, `机位${myCam}_${stamp()}.${type.includes('mp4')?'mp4':'webm'}`, dur);
+    send({type:'recState', on:false, dur});
+  };
+  r.start(1000);
+  localRec = true; localT0 = Date.now();
+  send({type:'recState', on:true});
+  if (fromRemote) toast(`机位 ${otherCam} 叫这台开始录影 🔴`);
+  updateUI();
+}
+function stopRec(fromRemote){
+  if (!localRec) return;
+  localRec = false; try{ recorder.stop(); }catch{}
+  if (fromRemote) toast('已停止录影，视频存在这台手机');
+  updateUI();
+}
+
+/* ---------- UI state ---------- */
+function updateUI(){
+  ['1','2'].forEach(c => {
+    const on = recOf(c);
+    pane(c).classList.toggle('recording', on);
+    pane(c).querySelector('.recb').classList.toggle('hidden', !on);
+  });
+  const busy = localRec || remoteRec;
+  $('#shutter').classList.toggle('photo', mode==='photo');
+  $('#shutter').classList.toggle('on', mode==='video' && targets().some(recOf));
+  $$('#seg button').forEach(b => b.disabled = busy);
+  $$('#modes button').forEach(b => b.disabled = busy);
+  $('#flipBtn').style.opacity = localRec ? .35 : 1;
+  clearInterval(tick);
+  if (busy) tick = setInterval(() => {
+    if (localRec) pane(myCam).querySelector('.recb').textContent = fmt(Date.now()-localT0);
+    if (remoteRec) pane(otherCam).querySelector('.recb').textContent = fmt(Date.now()-remoteT0);
+  }, 250);
+}
+function updateSeg(){ $$('#seg button').forEach(b => b.classList.toggle('on', b.dataset.t===target)); updateUI(); }
+function updateMode(){ $$('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m===mode)); updateUI(); }
+$$('#seg button').forEach(b => b.onclick = () => { if (localRec||remoteRec) return; target=b.dataset.t; updateSeg(); });
+$$('#modes button').forEach(b => b.onclick = () => { if (localRec||remoteRec) return; mode=b.dataset.m; updateMode(); });
+
+/* ---------- clips ---------- */
+function addClip(blob, type, name, info){
+  clips.unshift({ blob, type, name, info, url:URL.createObjectURL(blob), size:(blob.size/1048576).toFixed(1) });
+  $('#clipCount').textContent = clips.length; $('#clipCount').classList.remove('hidden');
+  if (type.startsWith('video')) toast(`已录好 ${info} · 点「本机」保存`);
+}
+function renderClips(){
+  const box = $('#clipList');
+  if (!clips.length){ box.innerHTML = '<div class="empty">这台手机还没有拍东西</div>'; return; }
+  box.innerHTML = '';
+  clips.forEach(c => {
+    const el = document.createElement('div'); el.className='clip';
+    const isImg = c.type.startsWith('image');
+    el.innerHTML = (isImg ? `<img src="${c.url}">` : `<video src="${c.url}#t=0.1" muted playsinline preload="metadata"></video>`) +
+      `<div class="meta">${c.name}<small>${c.info} · ${c.size} MB</small></div>
+       <div class="acts"><button class="sv">保存</button><a href="${c.url}" download="${c.name}">下载</a></div>`;
+    el.querySelector('.sv').onclick = async () => {
+      const file = new File([c.blob], c.name, {type:c.type});
+      if (navigator.canShare && navigator.canShare({files:[file]})){ try{ await navigator.share({files:[file]}); }catch{} }
+      else el.querySelector('a').click();
+    };
+    const v = el.querySelector('video');
+    if (v) v.onclick = () => v.paused ? (v.muted=false, v.play()) : v.pause();
+    box.appendChild(el);
+  });
+}
+$('#clipsBtn').onclick = () => { renderClips(); $('#clipsSheet').classList.remove('hidden'); };
+
+/* ---------- camera tools ---------- */
+$('#flipBtn').onclick = async () => {
+  if (localRec){ toast('录影中不能翻转镜头'); return; }
+  facing = facing==='environment' ? 'user' : 'environment';
+  localStream.getTracks().forEach(t => t.stop());
+  try { localStream = await getCam(); }
+  catch { toast('切换镜头失败'); facing = facing==='environment'?'user':'environment'; localStream = await getCam(); }
+  showLocal(); torchOn=false; $('#torchBtn').classList.remove('on');
+  const vt = localStream.getVideoTracks()[0];
+  const pc = call && call.peerConnection;
+  if (pc){ const s = pc.getSenders().find(s => s.track && s.track.kind==='video') || pc.getSenders()[0]; if (s) try{ await s.replaceTrack(vt); }catch{} }
+  send({type:'facing', facing});
+};
+$('#gridBtn').onclick = () => { document.body.classList.toggle('showgrid'); $('#gridBtn').classList.toggle('on'); };
+$('#torchBtn').onclick = async () => {
+  const t = localStream.getVideoTracks()[0];
+  const caps = t.getCapabilities ? t.getCapabilities() : {};
+  if (!caps.torch){ toast('这台手机的浏览器不支持开闪光灯'); return; }
+  torchOn = !torchOn;
+  try { await t.applyConstraints({advanced:[{torch:torchOn}]}); $('#torchBtn').classList.toggle('on', torchOn); }
+  catch { toast('开不了闪光灯'); }
+};
+['1','2'].forEach(c => pane(c).addEventListener('click', e => {
+  if (e.target.closest('button')) return;
+  const st = $('#stage'), cls = 'focus'+c, on = st.classList.contains(cls);
+  st.classList.remove('focus1','focus2'); if (!on) st.classList.add(cls);
+}));
+
+$('#roomPill').onclick = () => $('#codeSheet').classList.remove('hidden');
+$$('[data-close]').forEach(b => b.onclick = () => b.closest('.sheet').classList.add('hidden'));
+$$('.sheet').forEach(s => s.onclick = e => { if (e.target===s) s.classList.add('hidden'); });
+
+$('#leaveBtn').onclick = () => {
+  if (localRec) stopRec();
+  destroyPeer();
+  localStream && localStream.getTracks().forEach(t=>t.stop()); localStream = null;
+  $('#stage').classList.remove('focus1','focus2');
+  ['1','2'].forEach(c => { vid(c).srcObject = null; pane(c).querySelector('em').textContent=''; });
+  remoteRec = false; updateUI(); show('home');
+};
+
+/* ---------- keep screen on ---------- */
+async function keepAwake(){ try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch{} }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState==='visible' && myCam && localStream){ keepAwake(); vid(myCam).play().catch(()=>{}); if (call) vid(otherCam).play().catch(()=>{}); }
+});
+window.addEventListener('beforeunload', () => destroyPeer());
+})();
+</script>
+</body>
+</html>
