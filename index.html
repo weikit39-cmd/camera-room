@@ -63,14 +63,18 @@ header{display:flex;align-items:center;gap:8px;padding:8px 12px;padding-top:max(
 .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--mut);font-size:14px;text-align:center;padding:20px;z-index:2;background:#07070a}
 .ph .spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--mut);border-radius:50%;animation:spin 1s linear infinite}
 .ph .code{font-size:52px;font-weight:800;letter-spacing:12px;color:var(--txt);font-variant-numeric:tabular-nums;margin-right:-12px}
-.grid{position:absolute;inset:0;pointer-events:none;z-index:1;display:none}
+.grid{position:absolute;inset:0;pointer-events:none;z-index:3;display:none;transform:translateZ(0)}
 body.showgrid .grid{display:block}
-.grid i{position:absolute;background:rgba(255,255,255,.35)}
-.grid i:nth-child(1){left:33.33%;top:0;bottom:0;width:1px}
-.grid i:nth-child(2){left:66.66%;top:0;bottom:0;width:1px}
-.grid i:nth-child(3){top:33.33%;left:0;right:0;height:1px}
-.grid i:nth-child(4){top:66.66%;left:0;right:0;height:1px}
+.grid i{position:absolute;background:rgba(255,255,255,.75);box-shadow:0 0 2px rgba(0,0,0,.8)}
+.grid i:nth-child(1){left:33.33%;top:0;bottom:0;width:1.5px}
+.grid i:nth-child(2){left:66.66%;top:0;bottom:0;width:1.5px}
+.grid i:nth-child(3){top:33.33%;left:0;right:0;height:1.5px}
+.grid i:nth-child(4){top:66.66%;left:0;right:0;height:1.5px}
 
+.zooms{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:6px;z-index:5;background:rgba(0,0,0,.45);padding:4px;border-radius:99px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.zooms:empty{display:none}
+.zooms button{min-width:38px;height:32px;border-radius:99px;font-size:12px;font-weight:700;color:#fff;background:rgba(255,255,255,.12);padding:0 8px;font-variant-numeric:tabular-nums}
+.zooms button.on{background:#ffd60a;color:#000}
 #controls{flex:none;padding:10px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
 .seg{display:grid;grid-template-columns:1fr 1fr 1fr;background:var(--panel);border-radius:12px;padding:3px}
 .seg button{padding:9px 0;border-radius:10px;font-size:14px;font-weight:600;color:var(--mut)}
@@ -158,6 +162,7 @@ body.showgrid .grid{display:block}
       <div class="grid"><i></i><i></i><i></i><i></i></div>
       <div class="flash"></div>
       <div class="label">机位 1 <em></em></div>
+      <div class="zooms"></div>
       <div class="recb hidden">00:00</div>
       <div class="ph"><div class="spin"></div><div class="phTxt"></div></div>
     </div>
@@ -166,6 +171,7 @@ body.showgrid .grid{display:block}
       <div class="grid"><i></i><i></i><i></i><i></i></div>
       <div class="flash"></div>
       <div class="label">机位 2 <em></em></div>
+      <div class="zooms"></div>
       <div class="recb hidden">00:00</div>
       <div class="ph"><div class="spin"></div><div class="phTxt"></div></div>
     </div>
@@ -225,6 +231,7 @@ let facing = 'environment', remoteFacing = 'environment';
 let recorder = null, chunks = [], localRec = false, remoteRec = false;
 let localT0 = 0, remoteT0 = 0, tick = null;
 let target = '1', mode = 'video', clips = [], torchOn = false;
+let localZoom = 1, remoteZoomInfo = null;
 
 /* ---------- helpers ---------- */
 const newCode = () => String(Math.floor(1000 + Math.random()*9000));
@@ -284,7 +291,7 @@ async function enter(cam, code){
   pane(otherCam).querySelector('em').textContent = '· 对方';
   pane(myCam).querySelector('.ph').classList.add('hidden');
   pane(otherCam).querySelector('.ph').classList.remove('hidden');
-  showLocal(); setWaitingText();
+  showLocal(); setWaitingText(); initLocalZoom();
   updateSeg(); updateMode();
   startPeer(); keepAwake();
 }
@@ -373,7 +380,7 @@ function attachCall(c){
 
 function attachConn(d){
   conn = d;
-  d.on('open', () => send({type:'hello', facing, rec:localRec}));
+  d.on('open', () => { send({type:'hello', facing, rec:localRec}); sendZoomInfo(); });
   d.on('data', onData);
   d.on('close', () => { if (conn===d) conn = null; });
 }
@@ -383,6 +390,7 @@ function onLost(){
   setWaitingText(true);
   setStatus(`等待机位 ${otherCam}…`,'wait');
   remoteRec = false; updateUI(); dialing = 0;
+  remoteZoomInfo = null; renderZoom(otherCam);
 }
 
 function send(m){ if (conn && conn.open) try{ conn.send(m); }catch{} }
@@ -392,6 +400,8 @@ function onData(m){
   switch(m.type){
     case 'hello': remoteRec=!!m.rec; remoteFacing=m.facing; if(remoteRec) remoteT0=Date.now(); applyRemoteMirror(); updateUI(); break;
     case 'facing': remoteFacing=m.facing; applyRemoteMirror(); break;
+    case 'zoomInfo': remoteZoomInfo = m.caps ? {caps:m.caps, z:m.z} : null; renderZoom(otherCam); break;
+    case 'setZoom': setLocalZoom(m.z, true); break;
     case 'rec': m.action==='start' ? startRec(true) : stopRec(true); break;
     case 'shot': takePhoto(true); break;
     case 'shotDone': flash(otherCam); toast(`机位 ${otherCam} 拍好了 📸（存在那台手机）`); break;
@@ -529,6 +539,51 @@ function renderClips(){
 }
 $('#clipsBtn').onclick = () => { renderClips(); $('#clipsSheet').classList.remove('hidden'); };
 
+/* ---------- zoom ---------- */
+function zoomCaps(){
+  const t = localStream && localStream.getVideoTracks()[0];
+  const c = t && t.getCapabilities ? t.getCapabilities() : {};
+  return c.zoom && c.zoom.max > c.zoom.min ? {min:c.zoom.min, max:c.zoom.max} : null;
+}
+function zoomSteps(caps){
+  const s = new Set([caps.min]);
+  [0.5,1,2,3,5,10].forEach(z => { if (z > caps.min && z <= caps.max) s.add(z); });
+  return [...s].sort((a,b)=>a-b).slice(0,6);
+}
+function initLocalZoom(){
+  const caps = zoomCaps();
+  if (caps){ const st = localStream.getVideoTracks()[0].getSettings(); localZoom = st.zoom || caps.min; }
+  renderZoom(myCam); sendZoomInfo();
+}
+function sendZoomInfo(){ send({type:'zoomInfo', caps:zoomCaps(), z:localZoom}); }
+async function setLocalZoom(z, fromRemote){
+  const caps = zoomCaps(); if (!caps) return;
+  z = Math.min(caps.max, Math.max(caps.min, z));
+  const t = localStream.getVideoTracks()[0];
+  try { await t.applyConstraints({zoom:z}); }
+  catch { try { await t.applyConstraints({advanced:[{zoom:z}]}); } catch { toast('变焦失败'); return; } }
+  localZoom = z; renderZoom(myCam); sendZoomInfo();
+  if (fromRemote) toast(`机位 ${otherCam} 把这台调到 ${fmtZ(z)}`);
+}
+const fmtZ = z => (Math.round(z*10)/10) + '×';
+function renderZoom(c){
+  const box = pane(c).querySelector('.zooms');
+  const info = c===myCam ? (zoomCaps() ? {caps:zoomCaps(), z:localZoom} : null) : remoteZoomInfo;
+  box.innerHTML = '';
+  if (!info) return;
+  zoomSteps(info.caps).forEach(z => {
+    const b = document.createElement('button');
+    b.textContent = fmtZ(z);
+    if (Math.abs(info.z - z) < 0.05) b.classList.add('on');
+    b.onclick = e => {
+      e.stopPropagation();
+      if (c===myCam) setLocalZoom(z);
+      else if (conn && conn.open){ send({type:'setZoom', z}); }
+    };
+    box.appendChild(b);
+  });
+}
+
 /* ---------- camera tools ---------- */
 $('#flipBtn').onclick = async () => {
   if (localRec){ toast('录影中不能翻转镜头'); return; }
@@ -537,6 +592,7 @@ $('#flipBtn').onclick = async () => {
   try { localStream = await getCam(); }
   catch { toast('切换镜头失败'); facing = facing==='environment'?'user':'environment'; localStream = await getCam(); }
   showLocal(); torchOn=false; $('#torchBtn').classList.remove('on');
+  localZoom = 1; initLocalZoom();
   const vt = localStream.getVideoTracks()[0];
   const pc = call && call.peerConnection;
   if (pc){ const s = pc.getSenders().find(s => s.track && s.track.kind==='video') || pc.getSenders()[0]; if (s) try{ await s.replaceTrack(vt); }catch{} }
